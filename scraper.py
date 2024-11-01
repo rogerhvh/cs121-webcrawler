@@ -224,9 +224,6 @@ def get_subdomain_counts():
     return sorted(subdomain_counts.items())
 
 def write_stats_to_file(output_file="scraper_stats.txt"):
-    """
-    Write scraping statistics to a text file.
-    """
     with open(output_file, 'w', encoding='utf-8') as f:
         # 1. Unique pages count
         unique_count = get_unique_page_count()
