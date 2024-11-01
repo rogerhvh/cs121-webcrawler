@@ -1,129 +1,180 @@
 import re
-from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup
+import time
 import hashlib
+from urllib.parse import urlparse, urljoin, urlsplit
+from collections import Counter, defaultdict
+from bs4 import BeautifulSoup
 import nltk
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-import numpy as np
-from collections import Counter
 
-def scraper(url, resp, report):
-    links = extract_next_links(url, resp, report)
-    return [link for link in links if is_valid(link)]
+# nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
 
-def extract_next_links(url, resp, report):
-    """
-    Extracts and processes links from the response while handling various edge cases
-    and implementing the crawler requirements.
-    """
-    links_grabbed = []
+# global containers 
+unique_urls = set()
+word_counter = Counter()
+page_word_counts = {}
+subdomain_counts = defaultdict(int)
+content_hashes = set()  #  detecting duplicate content
+visited_patterns = defaultdict(int)  #  detecting pattern-based traps
+
+MAX_PATTERN_URLS = 30  # max number of similar URLs to crawl
+MAX_PATH_DEPTH = 8    # max depth for any path segment
+
+ALLOWED_PATHS = [
+    re.compile(r".*\.ics\.uci\.edu/.*"), 
+    re.compile(r".*\.cs\.uci\.edu/.*"), 
+    re.compile(r".*\.informatics\.uci\.edu/.*"), 
+    re.compile(r".*\.stat\.uci\.edu/.*"), 
+    re.compile(r".*today\.uci\.edu/department/information_computer_sciences/.*")
+]
+
+TRAP_PATTERNS = [
+    re.compile(pattern) for pattern in [
+        r"wics\.ics\.uci\.edu/events/20",
+        r"\?share=(facebook|twitter)",
+        r"\?action=login",
+        r"action=diff&version=",
+        r"timeline\?from",
+        r"\?version=(?!1$)",
+        r"/calendar/",
+        r"/archive/",
+        r"/ml/datasets.php",
+        r"/print/",
+        r"/rss/",
+        r"/feed/",
+        r"/tags/",
+        r"/404",
+        r"/auth", 
+        r"/~eppstein/pix/", 
+        r"/~eppstein/pubs",
+        r"/category/page/\d+"
+    ]
+]
+
+def is_duplicate_content(content):
+    content_hash = hashlib.md5(content).hexdigest()
+    if content_hash in content_hashes:
+        return True
+    content_hashes.add(content_hash)
+    return False
+
+def scraper(url, resp):
+    # log or track failed requests
+    if resp.status in [404, 604]:
+        print(f"Skipping {url} - Status code: {resp.status}")
+        return []
     
-    # Basic validation checks
-    if not is_valid(resp.url) or resp.status != 200 or not resp.raw_response.content:
-        return links_grabbed
-
-    try:
-        # Update unique pages count and subdomain tracking
-        report.unique_pages += 1
-        if ".ics.uci.edu" in url:
-            first_index = url.index("www.") + 4 if "www." in url else url.index("//") + 2
-            subdomain = url[first_index:url.index("ics.uci.edu") + 11]
-            report.subdomain_count[subdomain] = report.subdomain_count.get(subdomain, 0) + 1
-
-        # Decode content
-        try:
-            str_content = resp.raw_response.content.decode("utf-8", errors="replace")
-        except:
-            print(f"Error decoding content for {resp.raw_response.url}")
-            return links_grabbed
-
-        # Parse content
-        soup = BeautifulSoup(str_content, 'html.parser')
-        raw_contents = soup.get_text()
-
-        # Check minimum content length
-        if len(raw_contents) < report.min_word_threshold:
-            print(f"Low page size {len(raw_contents)}")
-            return links_grabbed
-
-        # Generate and check content fingerprint
-        fingerprint = np.array(simhash(url, raw_contents, report))
-        for vals in report.simhash_vals:
-            if similar(fingerprint, vals, report.similar_threshold):
-                return links_grabbed
-        report.simhash_vals.append(fingerprint)
-
-        # Extract and process links
-        for tag in soup.find_all('a', href=True):
-            curr_url = tag['href']
-            
-            # Handle relative URLs
-            if curr_url.startswith('/') and not curr_url.startswith('//'):
-                if "today.uci.edu/department/information_computer_sciences/" in url:
-                    domain = url[:url.index("today.uci.edu/department/information_computer_sciences") + 54]
-                else:
-                    domain = url[:url.index(".uci.edu") + 8]
-                curr_url = domain + curr_url
-
-            # Remove fragments
-            if "#" in curr_url:
-                curr_url = curr_url[:curr_url.index("#")]
-
-            # Validate and add unique URLs
-            if is_valid(curr_url) and correct_path(curr_url) and curr_url not in links_grabbed:
-                links_grabbed.append(curr_url)
-
-        print(f"number of url: {len(links_grabbed)} number of unique Pages {report.unique_pages}")
-        return links_grabbed
-
-    except Exception as e:
-        print(f"Exception in extract_next_links: {str(e)}")
+    # only successful responses
+    if resp.status != 200:
         return []
 
+    # skip if content is duplicate
+    if resp.raw_response and is_duplicate_content(resp.raw_response.content):
+        return []
+
+    # track unique URLs without fragments
+    add_unique_url(url)
+    # count words on the page 
+    count_words(resp)
+    # extract and filter links based on allowed paths
+    links = extract_next_links(url, resp)
+    valid_links = [link for link in links if is_valid(link)]
+
+    time.sleep(0.5) 
+    return valid_links
+
+def add_unique_url(url):
+    base_url = urlsplit(url)._replace(fragment='', query='').geturl()  # remove query parameters
+    unique_urls.add(base_url)
+    track_subdomain(base_url)
+
+def track_subdomain(url):
+    parsed_url = urlparse(url)
+    if 'uci.edu' in parsed_url.netloc:
+        subdomain = parsed_url.netloc
+        subdomain_counts[subdomain] += 1
+
+def extract_next_links(url, resp):
+    links = []
+    if resp.status == 200 and resp.raw_response:
+        soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+        for a_tag in soup.find_all('a', href=True):
+            link = urljoin(url, a_tag['href'])
+            links.append(link)
+    return links
+
 def is_valid(url):
-    """
-    Enhanced validation function with comprehensive trap checking.
-    """
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
+
+        # scheme validation
+        if parsed.scheme not in {"http", "https"}:
             return False
 
-        # Known trap patterns
-        trap_patterns = [
-            r"wics\.ics\.uci\.edu/events/20",  # Calendar trap
-            r"\?share=(facebook|twitter)",      # Social media shares
-            r"\?action=login",                  # Login pages
-            r"\.zip$", r"\.pdf$", r"\.txt$", r"\.tar\.gz$",  # File extensions
-            r"\.bib$", r"\.htm$", r"\.xml$", r"\.java$",
-            r"/\?afg",                          # Gallery trap
-            r"/img_",                           # Image patterns
-            r"action=diff&version=",            # Version diffs
-            r"timeline\?from",                  # Timeline trap
-            r"\?version=(?!1$)"                 # Version trap (except version=1)
-        ]
-
-        # Check against trap patterns
-        for pattern in trap_patterns:
-            if re.search(pattern, url):
-                return False
-
-        # Special case for doku.php
-        if "doku.php" in url and "?" in url:
+        # check path depth to avoid deep recursion traps
+        path_segments = parsed.path.split('/')
+        if len(path_segments) > 8:
             return False
 
-        # Special case for grape.ics.uci.edu
-        if "grape.ics.uci.edu" in url:
-            if any(pattern in url for pattern in [
-                "action=diff&version=",
-                "timeline?from",
-                "?version=" if not url.endswith("?version=1") else None
-            ]):
+        # check for known trap patterns
+        for pattern in TRAP_PATTERNS:
+            if pattern.search(url):
                 return False
 
-        # Check file extensions
-        if re.match(
+        # more trap conditions
+        if url.startswith("https://wics.ics.uci.edu/events/") \
+                or url.endswith("?share=facebook") \
+                or url.endswith("?share=twitter") \
+                or url.endswith("?action=login") \
+                or url.endswith(".zip") \
+                or url.endswith(".pdf") \
+                or url.endswith("txt") \
+                or url.endswith("tar.gz") \
+                or url.endswith(".bib") \
+                or url.endswith(".htm") \
+                or url.endswith(".xml") \
+                or url.endswith(".bam") \
+                or url.endswith(".java"):
+            return False
+
+        if url.startswith("http://www.ics.uci.edu/~eppstein/pix/"):
+            return False
+
+        # traps for 'wics' subdomain patterns
+        if "wics" in url and "/?afg" in url and not url.endswith("page_id=1"):
+            return False
+        elif "wics" in url and "/img_" in url:
+            return False
+
+        # trap for "doku.php"
+        if "doku.php" in url:
+            return False
+    
+        # no information
+        if "sli.ics.uci.edu/Classes" in url:
+            return False
+
+        # trap for "grape.ics.uci.edu" with specific patterns
+        if "grape.ics.uci.edu" in url and (
+            "action=diff&version=" in url or
+            "timeline?from" in url or
+            ("?version=" in url and not url.endswith("?version=1"))
+        ):
+            return False
+
+        # detect and limit repetitive patterns in visited patterns to avoid traps
+        path_pattern = re.sub(r'\d+', 'N', parsed.path)
+        visited_patterns[path_pattern] += 1
+        if visited_patterns[path_pattern] > MAX_PATTERN_URLS:
+            return False
+
+        # check if URL matches allowed paths
+        if not any(pattern.match(url) for pattern in ALLOWED_PATHS):
+            return False
+
+        # file extension exclusion to avoid non-crawlable files
+        return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
             + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
@@ -131,21 +182,72 @@ def is_valid(url):
             + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
-            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower()):
-            return False
-
-        return True
+            + r"|rm|smil|wmv|swf|wma|zip|rar|gz|mpg|img|war|apk|py|ppsx|pps)$", parsed.path.lower())
 
     except TypeError:
-        print(f"TypeError for {url}")
-        return False
+        print("TypeError for ", parsed)
+        raise
 
-def correct_path(url):
-    allowed_paths = [
-        r".ics.uci.edu/",
-        r".cs.uci.edu/",
-        r".informatics.uci.edu/",
-        r".stat.uci.edu/",
-        r"today.uci.edu/department/information_computer_sciences/"
-    ]
-    return any(path in url for path in allowed_paths)
+def count_words(resp):
+    if resp.status == 200 and resp.raw_response:
+        try:
+            soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+            # remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            # get text and normalize whitespace
+            text = ' '.join(soup.stripped_strings)
+            words = [
+                word.lower() for word in re.findall(r'\b\w+\b', text)
+                if word.lower() not in stop_words and len(word) > 1
+            ]
+            page_word_counts[resp.url] = len(words)
+            word_counter.update(words)
+        except Exception as e:
+            print(f"Error counting words on page {resp.url}: {str(e)}")
+
+# result reporting
+def get_unique_page_count():
+    return len(unique_urls)
+
+def get_longest_page():
+    if page_word_counts:
+        longest_page = max(page_word_counts, key=page_word_counts.get)
+        return longest_page, page_word_counts[longest_page]
+    return None, 0
+
+def get_most_common_words(n=50):
+    return word_counter.most_common(n)
+
+def get_subdomain_counts():
+    return sorted(subdomain_counts.items())
+
+def write_stats_to_file(output_file="scraper_stats.txt"):
+    """
+    Write scraping statistics to a text file.
+    """
+    with open(output_file, 'w', encoding='utf-8') as f:
+        # 1. Unique pages count
+        unique_count = get_unique_page_count()
+        f.write("1. Number of unique pages found:\n")
+        f.write(f"{unique_count}\n\n")
+
+        # 2. Longest page
+        longest_url, word_count = get_longest_page()
+        f.write("2. Longest page by word count:\n")
+        f.write(f"URL: {longest_url}\n")
+        f.write(f"Word count: {word_count}\n\n")
+
+        # 3. 50 most common words
+        f.write("3. 50 most common words:\n")
+        common_words = get_most_common_words(50)
+        for word, count in common_words:
+            f.write(f"{word}: {count}\n")
+        f.write("\n")
+
+        # 4. Subdomain statistics
+        f.write("4. Subdomains found:\n")
+        subdomains = get_subdomain_counts()
+        for subdomain, count in subdomains:
+            f.write(f"{subdomain}, {count}\n")

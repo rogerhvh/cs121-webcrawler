@@ -1,0 +1,99 @@
+1. Number of unique pages found:
+5220
+
+2. Longest page by word count:
+URL: https://cml.ics.uci.edu/category/aiml/
+Word count: 10111
+
+3. 50 most common words:
+2021: 30684
+markellekelly: 26855
+2022: 25311
+events: 21531
+research: 20110
+2020: 19185
+2023: 17447
+2018: 16345
+student: 14479
+software: 14007
+2019: 13642
+html: 13527
+update: 12303
+10: 12082
+2016: 12078
+computer: 11804
+11: 11477
+automatic: 11246
+2017: 11100
+2015: 11081
+uci: 10894
+engineering: 10823
+may: 10591
+information: 10435
+contact: 10037
+data: 9996
+graduate: 9925
+informatics: 9790
+undergraduate: 9777
+us: 9706
+12: 9657
+ics: 9313
+september: 9215
+ph: 8972
+department: 8969
+october: 8900
+june: 8845
+july: 8723
+december: 8157
+november: 8115
+students: 8109
+april: 8089
+march: 8068
+january: 7953
+code: 7905
+august: 7882
+february: 7854
+wics: 7684
+01: 7597
+science: 7561
+
+4. Subdomains found:
+acoi.ics.uci.edu, 104
+archive.ics.uci.edu, 41
+asterix.ics.uci.edu, 1
+cbcl.ics.uci.edu, 1
+cert.ics.uci.edu, 14
+cml.ics.uci.edu, 188
+code.ics.uci.edu, 11
+computableplant.ics.uci.edu, 91
+courselisting.ics.uci.edu, 4
+create.ics.uci.edu, 4
+cs.ics.uci.edu, 9
+dgillen.ics.uci.edu, 5
+emj.ics.uci.edu, 28
+fr.ics.uci.edu, 1
+futurehealth.ics.uci.edu, 112
+grape.ics.uci.edu, 17
+graphics.ics.uci.edu, 1
+hai.ics.uci.edu, 1
+hpi.ics.uci.edu, 2
+isg.ics.uci.edu, 247
+mailman.ics.uci.edu, 31
+mds.ics.uci.edu, 22
+mhcid.ics.uci.edu, 18
+mondego.ics.uci.edu, 1
+mswe.ics.uci.edu, 9
+mupro.proteomics.ics.uci.edu, 2
+nalini.ics.uci.edu, 5
+scratch.proteomics.ics.uci.edu, 2
+sdcl.ics.uci.edu, 18
+sli.ics.uci.edu, 228
+statconsulting.ics.uci.edu, 4
+transformativeplay.ics.uci.edu, 43
+vision.ics.uci.edu, 180
+wics.ics.uci.edu, 1341
+www-db.ics.uci.edu, 1
+www.cs.uci.edu, 4
+www.ics.uci.edu, 1596
+www.informatics.uci.edu, 990
+www.stat.uci.edu, 265
